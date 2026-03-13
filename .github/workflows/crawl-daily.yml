@@ -175,6 +175,10 @@ jobs:
           CF_DATABASE_ID: ${{ secrets.CF_DATABASE_ID }}
         run: |
           FILE=$(ls -1 scripts/daily-*.json 2>/dev/null | head -1)
+          if [ -z "$FILE" ]; then
+            echo "결과 파일 없음 — 업로드 스킵"
+            exit 0
+          fi
           npx tsx scripts/upload-d1.ts --upsert --file "$FILE"
 
       - name: Notify production complete

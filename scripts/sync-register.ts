@@ -31,8 +31,13 @@ async function main() {
   console.log(`\n날짜: ${date}, 등록 선수: ${players.length}명`);
 
   if (players.length === 0) {
-    console.log("등록 선수가 없습니다 (비시즌일 수 있음).");
+    console.log("등록 선수가 없습니다 (비시즌일 수 있음). 싱크 스킵.");
     return;
+  }
+
+  // 크롤링 실패 감지: 시즌 중 최소 100명 이상 예상
+  if (players.length < 50) {
+    console.warn(`⚠️ 등록 선수가 ${players.length}명으로 비정상적으로 적습니다. 크롤링 오류 가능성.`);
   }
 
   console.log(`\n${API_URL}/sync/register 로 전송 중...`);

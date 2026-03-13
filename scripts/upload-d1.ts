@@ -213,7 +213,7 @@ async function runUpload() {
   for (let i = 0; i < withStats.length; i += BATCH) {
     const batch = withStats.slice(i, i + BATCH);
     const placeholders = batch
-      .map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .join(",\n");
 
     const params: unknown[] = [];
@@ -225,14 +225,14 @@ async function runUpload() {
         s.avg, s.pa, s.ab, s.h,
         s["2b"], s["3b"], s.hr, s.rbi,
         s.bb, s.hbp, s.so,
-        s.slg, s.obp
+        s.slg, s.obp, s.ops
       );
     }
 
     await execD1(
       `INSERT OR REPLACE INTO Matchup
         (pitcherKboId, pitcherName, pitcherTeam, hitterKboId, hitterName, hitterTeam,
-         avg, pa, ab, h, "2b", "3b", hr, rbi, bb, hbp, so, slg, obp)
+         avg, pa, ab, h, "2b", "3b", hr, rbi, bb, hbp, so, slg, obp, ops)
        VALUES ${placeholders}`,
       params
     );
