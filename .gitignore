@@ -2,6 +2,9 @@ node_modules/
 dist/
 .env
 
+# Local editor/assistant configs
+.claude/
+
 # Crawl caches (large files)
 scripts/matchup-cache-*.json
 scripts/matchup-results-*.json
