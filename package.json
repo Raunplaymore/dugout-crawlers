@@ -16,6 +16,7 @@
     "sync": "tsx scripts/sync.ts",
     "sync:register": "tsx scripts/sync-register.ts",
     "resolve:namu": "tsx scripts/resolve-namuwiki.ts",
+    "crawl:daily": "tsx scripts/crawl-daily.ts",
     "upload:matchup": "tsx scripts/upload-d1.ts"
   },
   "dependencies": {

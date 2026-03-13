@@ -14,3 +14,7 @@ scripts/matchup-sample.json
 scripts/defense-cache.json
 scripts/.namu-progress.json
 scripts/crawled-players.json
+scripts/daily-*.json
+
+# Local docs (not for repo)
+CRAWL_PLAN.md

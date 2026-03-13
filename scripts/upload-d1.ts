@@ -7,7 +7,9 @@
  *   CF_DATABASE_ID — D1 Database ID
  *
  * 사용법:
- *   npx tsx scripts/upload-d1.ts
+ *   npx tsx scripts/upload-d1.ts                                    # 전체 교체 (DELETE + INSERT)
+ *   npx tsx scripts/upload-d1.ts --upsert                           # UPSERT (기존 유지 + 업데이트)
+ *   npx tsx scripts/upload-d1.ts --upsert --file scripts/daily-20260322.json   # 일일 업데이트
  */
 import { readFileSync, existsSync } from "fs";
 
@@ -64,17 +66,25 @@ async function execD1(sql: string, params: unknown[] = []) {
   return data;
 }
 
+function getCliOption(flag: string, defaultVal: string): string {
+  const idx = process.argv.indexOf(flag);
+  if (idx === -1 || idx + 1 >= process.argv.length) return defaultVal;
+  return process.argv[idx + 1];
+}
+
 async function main() {
-  // Load merged results
-  const resultsPath = "data/matchup-merged.json";
+  const isUpsert = process.argv.includes("--upsert");
+  const resultsPath = getCliOption("--file", "data/matchup-merged.json");
+
   if (!existsSync(resultsPath)) {
-    console.error(`${resultsPath} not found. Run merge first.`);
+    console.error(`${resultsPath} not found.`);
     process.exit(1);
   }
 
   const results: MatchupResult[] = JSON.parse(readFileSync(resultsPath, "utf-8"));
   const withStats = results.filter((r) => r.stats);
   console.log(`Total: ${results.length}, with stats: ${withStats.length}`);
+  console.log(`Mode: ${isUpsert ? "UPSERT (기존 유지 + 업데이트)" : "REPLACE (전체 교체)"}`);
 
   // Ensure table exists
   await execD1(`
@@ -105,9 +115,10 @@ async function main() {
   `);
   console.log("Table ensured.");
 
-  // Clear existing data
-  await execD1("DELETE FROM Matchup");
-  console.log("Cleared existing data.");
+  if (!isUpsert) {
+    await execD1("DELETE FROM Matchup");
+    console.log("Cleared existing data.");
+  }
 
   // Batch insert (50 per batch)
   const BATCH = 50;

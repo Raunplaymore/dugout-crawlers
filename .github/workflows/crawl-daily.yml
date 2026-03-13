@@ -1,0 +1,88 @@
+name: 일일 맞대결 업데이트
+
+on:
+  schedule:
+    # 매일 UTC 14:00 (KST 23:00) — 경기 종료 후
+    - cron: '0 14 * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: '날짜 (YYYYMMDD, 비워두면 오늘)'
+        default: ''
+      delay:
+        description: '요청 간격 (ms)'
+        default: '3000'
+
+jobs:
+  crawl-daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Crawl daily matchups
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          DATE="${{ github.event.inputs.date }}"
+          DELAY="${{ github.event.inputs.delay || '3000' }}"
+          FLAGS="--delay $DELAY"
+          if [ -n "$DATE" ]; then FLAGS="$FLAGS --date $DATE"; fi
+          npx tsx scripts/crawl-daily.ts $FLAGS
+
+      - name: Find daily result file
+        id: find-result
+        run: |
+          FILE=$(ls -1 scripts/daily-*.json 2>/dev/null | head -1)
+          if [ -n "$FILE" ]; then
+            echo "file=$FILE" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            RECORDS=$(node -e "const d=require('./${FILE}'); console.log(d.filter(r=>r.stats).length)")
+            echo "records=$RECORDS" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload to D1 (UPSERT)
+        if: steps.find-result.outputs.found == 'true' && steps.find-result.outputs.records != '0'
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_DATABASE_ID: ${{ secrets.CF_DATABASE_ID }}
+        run: npx tsx scripts/upload-d1.ts --upsert --file "${{ steps.find-result.outputs.file }}"
+
+      - name: Upload daily artifact
+        if: steps.find-result.outputs.found == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-matchup-${{ github.event.inputs.date || 'today' }}
+          path: scripts/daily-*.json
+          retention-days: 30
+
+      - name: Notify
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          STATUS="${{ job.status }}"
+          EMOJI=$([[ "$STATUS" == "success" ]] && echo "✅" || echo "❌")
+          RECORDS="${{ steps.find-result.outputs.records || '0' }}"
+          if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+            curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d chat_id="${TELEGRAM_CHAT_ID}" \
+              -d parse_mode="HTML" \
+              -d text="${EMOJI} <b>일일 맞대결 업데이트 ${STATUS}</b> (D1: ${RECORDS}건)" || true
+          fi
