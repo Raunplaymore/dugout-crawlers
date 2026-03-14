@@ -206,36 +206,45 @@ async function runUpload() {
     console.log("Cleared existing data.");
   }
 
-  // Batch insert — D1 SQL 변수 제한 ~500개, 20컬럼 × 20행 = 400 (여유 확보)
-  const BATCH = 20;
+  // 개별 INSERT를 배치로 전송 — D1 REST API batch endpoint 사용
+  const BATCH = 50;
   let inserted = 0;
+  const insertSql = `INSERT OR REPLACE INTO Matchup
+    (pitcherKboId, pitcherName, pitcherTeam, hitterKboId, hitterName, hitterTeam,
+     avg, pa, ab, h, "2b", "3b", hr, rbi, bb, hbp, so, slg, obp, ops)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
   for (let i = 0; i < withStats.length; i += BATCH) {
     const batch = withStats.slice(i, i + BATCH);
-    const placeholders = batch
-      .map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .join(",\n");
-
-    const params: unknown[] = [];
-    for (const r of batch) {
+    const statements = batch.map((r) => {
       const s = r.stats!;
-      params.push(
-        r.pitcherId, r.pitcherName, r.pitcherTeam,
-        r.hitterId, r.hitterName, r.hitterTeam,
-        s.avg, s.pa, s.ab, s.h,
-        s["2b"], s["3b"], s.hr, s.rbi,
-        s.bb, s.hbp, s.so,
-        s.slg, s.obp, s.ops
-      );
-    }
+      return {
+        sql: insertSql,
+        params: [
+          r.pitcherId, r.pitcherName, r.pitcherTeam,
+          r.hitterId, r.hitterName, r.hitterTeam,
+          s.avg, s.pa, s.ab, s.h,
+          s["2b"], s["3b"], s.hr, s.rbi,
+          s.bb, s.hbp, s.so,
+          s.slg, s.obp, s.ops,
+        ],
+      };
+    });
 
-    await execD1(
-      `INSERT OR REPLACE INTO Matchup
-        (pitcherKboId, pitcherName, pitcherTeam, hitterKboId, hitterName, hitterTeam,
-         avg, pa, ab, h, "2b", "3b", hr, rbi, bb, hbp, so, slg, obp, ops)
-       VALUES ${placeholders}`,
-      params
-    );
+    // D1 batch API: 여러 statement를 하나의 트랜잭션으로 전송
+    const res = await fetch(D1_API, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${CF_API_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(statements),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.error("D1 batch error:", JSON.stringify(data, null, 2));
+      throw new Error(`D1 batch failed: ${res.status}`);
+    }
 
     inserted += batch.length;
     if (inserted % 100 === 0 || inserted === withStats.length) {
