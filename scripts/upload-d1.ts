@@ -206,8 +206,8 @@ async function runUpload() {
     console.log("Cleared existing data.");
   }
 
-  // Batch insert — D1 SQL 변수 제한 500개, 20컬럼 × 25행 = 500
-  const BATCH = 25;
+  // Batch insert — D1 SQL 변수 제한 ~500개, 20컬럼 × 20행 = 400 (여유 확보)
+  const BATCH = 20;
   let inserted = 0;
 
   for (let i = 0; i < withStats.length; i += BATCH) {
