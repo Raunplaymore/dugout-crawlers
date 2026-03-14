@@ -86,16 +86,20 @@ const CODE_TO_TEAM: Record<string, string> = Object.fromEntries(
 
 // ─── 캐시 ───
 const PITCHER_TEAM_FILTER = getCliOption("--pitcher-team", "");
+const HITTER_TEAMS_FILTER = getCliOption("--hitter-teams", ""); // 쉼표 구분: "LG,SS,OB,WO,NC"
+
+// MATCHUP_CACHE_SUFFIX 환경변수로 캐시 파일명을 오버라이드 (CI에서 HT-1, HT-2 분리용)
+const CACHE_SUFFIX = process.env.MATCHUP_CACHE_SUFFIX || PITCHER_TEAM_FILTER;
 
 function getCachePath(): string {
-  return PITCHER_TEAM_FILTER
-    ? `scripts/matchup-cache-${PITCHER_TEAM_FILTER}.json`
+  return CACHE_SUFFIX
+    ? `scripts/matchup-cache-${CACHE_SUFFIX}.json`
     : "scripts/matchup-cache.json";
 }
 
 function getResultPath(): string {
-  return PITCHER_TEAM_FILTER
-    ? `scripts/matchup-results-${PITCHER_TEAM_FILTER}.json`
+  return CACHE_SUFFIX
+    ? `scripts/matchup-results-${CACHE_SUFFIX}.json`
     : "scripts/matchup-results.json";
 }
 
@@ -566,6 +570,14 @@ async function runFull() {
     process.exit(1);
   }
 
+  // --hitter-teams 필터 적용 (쉼표 구분)
+  const hitterTeamSet = HITTER_TEAMS_FILTER
+    ? new Set(HITTER_TEAMS_FILTER.split(",").map(s => s.trim()))
+    : null;
+  const filteredHitters = hitterTeamSet
+    ? hitters.filter(h => hitterTeamSet.has(h.teamCode))
+    : hitters;
+
   // 팀별로 그룹화 — 같은 투수팀끼리 묶어서 세션 재사용
   const pitchersByTeam = new Map<string, PlayerInfo[]>();
   for (const p of pitchers) {
@@ -575,7 +587,7 @@ async function runFull() {
   }
 
   const hittersByTeam = new Map<string, PlayerInfo[]>();
-  for (const h of hitters) {
+  for (const h of filteredHitters) {
     const arr = hittersByTeam.get(h.teamCode) || [];
     arr.push(h);
     hittersByTeam.set(h.teamCode, arr);
@@ -785,16 +797,27 @@ async function runFull() {
 
 // ─── 팀별 캐시 병합 ───
 function runMerge() {
+  // 팀 코드 기반 + 분할 슬러그(HT-1, HT-2 등) 파일도 자동 탐색
   const allTeamCodes = Object.values(TEAM_CODE);
+  const cacheFiles: string[] = [];
+  for (const code of allTeamCodes) {
+    const base = `scripts/matchup-cache-${code}.json`;
+    if (existsSync(base)) {
+      cacheFiles.push(base);
+    }
+    // 분할 파일 탐색 (HT-1, HT-2, ...)
+    for (let i = 1; i <= 5; i++) {
+      const split = `scripts/matchup-cache-${code}-${i}.json`;
+      if (existsSync(split)) cacheFiles.push(split);
+    }
+  }
+
   const merged: CrawlCache = { completed: [], results: [], lastUpdated: "" };
   const completedSet = new Set<string>();
 
-  for (const code of allTeamCodes) {
-    const cachePath = `scripts/matchup-cache-${code}.json`;
-    if (!existsSync(cachePath)) {
-      console.log(`  ${code}: 캐시 없음 — 스킵`);
-      continue;
-    }
+  for (const cachePath of cacheFiles) {
+    const slug = cachePath.replace("scripts/matchup-cache-", "").replace(".json", "");
+    const teamCode = slug.split("-")[0];
     try {
       const teamCache: CrawlCache = JSON.parse(readFileSync(cachePath, "utf-8"));
       let added = 0;
@@ -808,9 +831,9 @@ function runMerge() {
         }
       }
       const withStats = teamCache.results.filter(r => r.stats).length;
-      console.log(`  ${code} (${CODE_TO_TEAM[code]}): ${teamCache.completed.length}건 (데이터:${withStats}) → ${added}건 추가`);
+      console.log(`  ${slug} (${CODE_TO_TEAM[teamCode] || teamCode}): ${teamCache.completed.length}건 (데이터:${withStats}) → ${added}건 추가`);
     } catch (e) {
-      console.error(`  ${code}: 파싱 에러 —`, e);
+      console.error(`  ${slug}: 파싱 에러 —`, e);
     }
   }
 

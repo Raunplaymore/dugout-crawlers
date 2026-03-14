@@ -10,11 +10,44 @@ on:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
-        team: [LG, HH, SK, SS, NC, KT, LT, HT, OB, WO]
+        include:
+          - team: LG
+            slug: LG
+            hitter-teams: ''
+          - team: HH
+            slug: HH
+            hitter-teams: ''
+          - team: SK
+            slug: SK
+            hitter-teams: ''
+          - team: SS
+            slug: SS
+            hitter-teams: ''
+          - team: NC
+            slug: NC
+            hitter-teams: ''
+          - team: KT
+            slug: KT
+            hitter-teams: ''
+          - team: LT
+            slug: LT
+            hitter-teams: ''
+          - team: HT
+            slug: HT-1
+            hitter-teams: 'LG,SS,OB,WO,NC'
+          - team: HT
+            slug: HT-2
+            hitter-teams: 'HH,SK,KT,LT'
+          - team: OB
+            slug: OB
+            hitter-teams: ''
+          - team: WO
+            slug: WO
+            hitter-teams: ''
 
     steps:
       - name: Checkout
@@ -32,42 +65,48 @@ jobs:
       - name: Restore crawl cache
         uses: actions/cache/restore@v4
         with:
-          path: scripts/matchup-cache-${{ matrix.team }}.json
-          key: matchup-${{ matrix.team }}-${{ github.run_number }}
+          path: scripts/matchup-cache-${{ matrix.slug }}.json
+          key: matchup-${{ matrix.slug }}-${{ github.run_number }}
           restore-keys: |
-            matchup-${{ matrix.team }}-
+            matchup-${{ matrix.slug }}-
 
       - name: Show cache status
         run: |
-          FILE="scripts/matchup-cache-${{ matrix.team }}.json"
+          FILE="scripts/matchup-cache-${{ matrix.slug }}.json"
           if [ -f "$FILE" ]; then
             COMPLETED=$(node -e "const c=require('./${FILE}'); console.log(c.completed.length)")
-            echo "[${{ matrix.team }}] 캐시: ${COMPLETED}건 완료"
+            echo "[${{ matrix.slug }}] 캐시: ${COMPLETED}건 완료"
           else
-            echo "[${{ matrix.team }}] 캐시 없음"
+            echo "[${{ matrix.slug }}] 캐시 없음"
           fi
 
-      - name: Run crawl (${{ matrix.team }})
+      - name: Run crawl (${{ matrix.slug }})
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MATCHUP_CACHE_SUFFIX: ${{ matrix.slug }}
         run: |
           DELAY="${{ github.event.inputs.delay || '2000' }}"
-          npx tsx scripts/crawl-matchup.ts --full --pitcher-team "${{ matrix.team }}" --delay "$DELAY" --limit "15000"
+          HITTER_TEAMS="${{ matrix.hitter-teams }}"
+          CMD="npx tsx scripts/crawl-matchup.ts --full --pitcher-team ${{ matrix.team }} --delay $DELAY --limit 15000"
+          if [ -n "$HITTER_TEAMS" ]; then
+            CMD="$CMD --hitter-teams $HITTER_TEAMS"
+          fi
+          $CMD
 
       - name: Save crawl cache
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: scripts/matchup-cache-${{ matrix.team }}.json
-          key: matchup-${{ matrix.team }}-${{ github.run_number }}
+          path: scripts/matchup-cache-${{ matrix.slug }}.json
+          key: matchup-${{ matrix.slug }}-${{ github.run_number }}
 
       - name: Upload team result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: matchup-${{ matrix.team }}
-          path: scripts/matchup-cache-${{ matrix.team }}.json
+          name: matchup-${{ matrix.slug }}
+          path: scripts/matchup-cache-${{ matrix.slug }}.json
           retention-days: 30
 
   # ── Stage 1: Staging D1에 업로드 ──
@@ -109,7 +148,9 @@ jobs:
         run: npx tsx scripts/crawl-matchup.ts --merge
 
       - name: Copy merged to data/
-        run: cp scripts/matchup-results.json data/matchup-merged.json
+        run: |
+          mkdir -p data
+          cp scripts/matchup-results.json data/matchup-merged.json
 
       - name: Upload to Staging D1
         env:
