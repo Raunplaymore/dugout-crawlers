@@ -257,8 +257,19 @@ export async function crawlAllPlayers(): Promise<CrawledPlayer[]> {
 }
 
 if (require.main === module) {
+  const outIdx = process.argv.indexOf("--output");
+  const outPath = outIdx !== -1 && outIdx + 1 < process.argv.length ? process.argv[outIdx + 1] : "";
+
   crawlAllPlayers()
-    .then((players) => console.log(JSON.stringify(players, null, 2)))
+    .then((players) => {
+      const json = JSON.stringify(players, null, 2);
+      if (outPath) {
+        require("fs").writeFileSync(outPath, json);
+        console.log(`${players.length}명 → ${outPath} 저장 완료`);
+      } else {
+        console.log(json);
+      }
+    })
     .catch(async (e) => {
       console.error("크롤링 실패:", e);
       await sendTelegram(`🚨 <b>[crawl-players] 실패</b>\n${String(e).substring(0, 200)}`);

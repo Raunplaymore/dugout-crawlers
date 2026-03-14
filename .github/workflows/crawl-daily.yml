@@ -40,7 +40,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: npx tsx scripts/crawl-players.ts > scripts/crawled-players.json
+        run: npx tsx scripts/crawl-players.ts --output scripts/crawled-players.json
 
       - name: Verify player list
         run: |
