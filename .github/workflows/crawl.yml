@@ -62,6 +62,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Crawl player list (선수 목록 최신화)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          npx tsx scripts/crawl-players.ts --output scripts/crawled-players-new.json || true
+          NEW_COUNT=$(node -e "try{const d=require('./scripts/crawled-players-new.json');console.log(d.length)}catch{console.log(0)}")
+          echo "크롤링: ${NEW_COUNT}명"
+          if [ "$NEW_COUNT" -gt 50 ]; then
+            mv scripts/crawled-players-new.json scripts/crawled-players.json
+            echo "최신 선수 목록 사용 (${NEW_COUNT}명)"
+          else
+            echo "::error::선수 목록 크롤링 실패 (${NEW_COUNT}명)"
+            exit 1
+          fi
+
       - name: Restore crawl cache
         uses: actions/cache/restore@v4
         with:
