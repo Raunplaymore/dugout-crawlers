@@ -42,37 +42,55 @@ async function main() {
     await sendTelegram(`⚠️ <b>[sync-register] 경고</b>\n등록 선수 ${players.length}명 — 비정상적으로 적음.`);
   }
 
-  console.log(`\n${API_URL}/sync/register 로 전송 중...`);
-
-  const res = await fetch(`${API_URL}/sync/register`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-sync-secret": SYNC_SECRET!,
-    },
-    body: JSON.stringify({ players }),
-  });
-
-  const text = await res.text();
-  let data;
-  try { data = JSON.parse(text); } catch {
-    console.error(`Non-JSON response (${res.status}): ${text.substring(0, 300)}`);
-    await sendTelegram(`🚨 <b>[sync-register] 실패</b>\nAPI Non-JSON 응답 (${res.status})`);
-    process.exit(1);
+  // Workers 서브리퀘스트 제한 회피를 위해 배치 전송
+  const BATCH_SIZE = 150;
+  const batches = [];
+  for (let i = 0; i < players.length; i += BATCH_SIZE) {
+    batches.push(players.slice(i, i + BATCH_SIZE));
   }
 
-  if (res.ok) {
-    console.log("\n싱크 완료:", data);
-    if (data.unmatchedList?.length > 0) {
-      console.log("\n매칭 실패 선수:");
-      for (const name of data.unmatchedList) {
-        console.log(`  - ${name}`);
-      }
+  console.log(`\n${API_URL}/sync/register 로 전송 중... (${batches.length}개 배치, 각 ${BATCH_SIZE}명)`);
+
+  const allUnmatched: string[] = [];
+  let totalMatched = 0;
+
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    console.log(`  배치 ${i + 1}/${batches.length} (${batch.length}명)...`);
+
+    const res = await fetch(`${API_URL}/sync/register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-sync-secret": SYNC_SECRET!,
+      },
+      body: JSON.stringify({ players: batch, partial: batches.length > 1, batchIndex: i, totalBatches: batches.length }),
+    });
+
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch {
+      console.error(`Non-JSON response (${res.status}): ${text.substring(0, 300)}`);
+      await sendTelegram(`🚨 <b>[sync-register] 실패</b>\nAPI Non-JSON 응답 (${res.status}) 배치 ${i + 1}`);
+      process.exit(1);
     }
-  } else {
-    console.error("\n싱크 실패:", res.status, data);
-    await sendTelegram(`🚨 <b>[sync-register] 싱크 실패</b>\nHTTP ${res.status}: ${JSON.stringify(data).substring(0, 200)}`);
-    process.exit(1);
+
+    if (!res.ok) {
+      console.error(`\n싱크 실패 (배치 ${i + 1}):`, res.status, data);
+      await sendTelegram(`🚨 <b>[sync-register] 싱크 실패</b>\n배치 ${i + 1}/${batches.length} HTTP ${res.status}: ${JSON.stringify(data).substring(0, 200)}`);
+      process.exit(1);
+    }
+
+    if (data.unmatchedList?.length > 0) allUnmatched.push(...data.unmatchedList);
+    if (data.matched) totalMatched += data.matched;
+  }
+
+  console.log(`\n싱크 완료: 총 ${totalMatched}명 매칭`);
+  if (allUnmatched.length > 0) {
+    console.log("\n매칭 실패 선수:");
+    for (const name of allUnmatched) {
+      console.log(`  - ${name}`);
+    }
   }
 }
 
