@@ -238,6 +238,17 @@ function extractHiddenFields(html: string): Record<string, string> {
   return fields;
 }
 
+function parseSelectOptions(html: string, selectId: string): { id: string; name: string }[] {
+  const $ = cheerio.load(html);
+  const options: { id: string; name: string }[] = [];
+  $(`select[id*='${selectId}'] option`).each((_, el) => {
+    const val = $(el).attr("value") || "";
+    const text = $(el).text().trim();
+    if (val && text) options.push({ id: val, name: text });
+  });
+  return options;
+}
+
 function buildPostBody(
   hiddenFields: Record<string, string>,
   overrides: Record<string, string>
@@ -286,6 +297,11 @@ class KBOSession {
   private hiddenFields: Record<string, string> = {};
   private currentPitcherTeam = "";
   private currentHitterTeam = "";
+  private _pitcherOptions: { id: string; name: string }[] = [];
+  private _hitterOptions: { id: string; name: string }[] = [];
+
+  get pitcherOptions() { return this._pitcherOptions; }
+  get hitterOptions() { return this._hitterOptions; }
 
   async init(): Promise<boolean> {
     try {
@@ -327,6 +343,7 @@ class KBOSession {
       const html = await res.text();
       this.hiddenFields = extractHiddenFields(html);
       this.currentPitcherTeam = teamCode;
+      this._pitcherOptions = parseSelectOptions(html, "ddlPitcherPlayer");
       return html.includes("ddlPitcherPlayer");
     } catch (e) {
       console.error(`  투수팀 ${teamCode} 선택 실패:`, e);
@@ -357,6 +374,7 @@ class KBOSession {
       const html = await res.text();
       this.hiddenFields = extractHiddenFields(html);
       this.currentHitterTeam = teamCode;
+      this._hitterOptions = parseSelectOptions(html, "ddlHitterPlayer");
       return html.includes("ddlHitterPlayer");
     } catch (e) {
       console.error(`  타자팀 ${teamCode} 선택 실패:`, e);
@@ -418,6 +436,41 @@ class KBOSession {
   }
 }
 
+// ─── 맞대결 드롭다운에서 선수 목록 수집 ───
+async function loadPlayersFromMatchupPage(teamCodes: Set<string>): Promise<PlayerInfo[]> {
+  console.log("맞대결 페이지 드롭다운에서 선수 목록 수집 중...\n");
+
+  const players: PlayerInfo[] = [];
+  const session = new KBOSession();
+
+  if (!await session.init()) throw new Error("세션 초기화 실패");
+
+  for (const [teamName, teamCode] of Object.entries(TEAM_CODE)) {
+    if (!teamCodes.has(teamCode)) continue;
+
+    if (await session.selectPitcherTeam(teamCode)) {
+      for (const opt of session.pitcherOptions) {
+        players.push({ name: opt.name, team: teamName, teamCode, kboPlayerId: opt.id, position: "투수" });
+      }
+      console.log(`  ${teamName}: 투수 ${session.pitcherOptions.length}명`);
+    }
+    await sleep(2000);
+
+    if (await session.selectHitterTeam(teamCode)) {
+      for (const opt of session.hitterOptions) {
+        players.push({ name: opt.name, team: teamName, teamCode, kboPlayerId: opt.id, position: "타자" });
+      }
+      console.log(`  ${teamName}: 타자 ${session.hitterOptions.length}명`);
+    }
+    await sleep(2000);
+  }
+
+  const pitcherCount = players.filter(p => p.position === "투수").length;
+  const hitterCount = players.filter(p => p.position !== "투수").length;
+  console.log(`\n선수 수집 완료: 투수 ${pitcherCount}명, 타자 ${hitterCount}명\n`);
+  return players;
+}
+
 // ─── 메인 ───
 async function main() {
   const today = new Date();
@@ -447,8 +500,13 @@ async function main() {
     console.log(`  ${g.awayTeam} @ ${g.homeTeam}`);
   }
 
-  // 2. 경기 팀 기반 매치업 쌍 구성
-  const allPlayers = loadPlayers();
+  // 2. 경기 팀 기반 매치업 쌍 구성 (맞대결 드롭다운에서 선수 수집)
+  const gameTeamCodes = new Set<string>();
+  for (const g of games) {
+    gameTeamCodes.add(g.awayTeamCode);
+    gameTeamCodes.add(g.homeTeamCode);
+  }
+  const allPlayers = await loadPlayersFromMatchupPage(gameTeamCodes);
   const pairs: { pitcher: PlayerInfo; hitter: PlayerInfo }[] = [];
 
   // 중복 팀 쌍 제거 (더블헤더 대응)
