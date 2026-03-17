@@ -568,7 +568,8 @@ async function runSample() {
 }
 
 // ─── 맞대결 드롭다운에서 선수 목록 수집 ───
-async function loadPlayersFromMatchupPage(): Promise<{ pitchers: PlayerInfo[]; hitters: PlayerInfo[] }> {
+// pitcherTeamFilter: 특정 투수팀만 수집 (CI 병렬 실행 시 부하 분산)
+async function loadPlayersFromMatchupPage(pitcherTeamFilter?: string): Promise<{ pitchers: PlayerInfo[]; hitters: PlayerInfo[] }> {
   console.log("맞대결 페이지 드롭다운에서 선수 목록 수집 중...\n");
 
   const pitchers: PlayerInfo[] = [];
@@ -578,21 +579,27 @@ async function loadPlayersFromMatchupPage(): Promise<{ pitchers: PlayerInfo[]; h
   if (!await session.init()) throw new Error("세션 초기화 실패");
 
   for (const [teamName, teamCode] of Object.entries(TEAM_CODE)) {
-    if (await session.selectPitcherTeam(teamCode)) {
-      for (const opt of session.pitcherOptions) {
-        pitchers.push({ name: opt.name, team: teamName, teamCode, kboPlayerId: opt.id, position: "투수" });
+    // 투수: 필터가 있으면 해당 팀만, 없으면 전체
+    if (!pitcherTeamFilter || teamCode === pitcherTeamFilter) {
+      if (await session.selectPitcherTeam(teamCode)) {
+        for (const opt of session.pitcherOptions) {
+          pitchers.push({ name: opt.name, team: teamName, teamCode, kboPlayerId: opt.id, position: "투수" });
+        }
+        console.log(`  ${teamName}: 투수 ${session.pitcherOptions.length}명`);
       }
-      console.log(`  ${teamName}: 투수 ${session.pitcherOptions.length}명`);
+      await sleep(2000);
     }
-    await sleep(2000);
 
-    if (await session.selectHitterTeam(teamCode)) {
-      for (const opt of session.hitterOptions) {
-        hitters.push({ name: opt.name, team: teamName, teamCode, kboPlayerId: opt.id, position: "타자" });
+    // 타자: 필터가 있으면 상대 팀만 (같은 팀 스킵), 없으면 전체
+    if (!pitcherTeamFilter || teamCode !== pitcherTeamFilter) {
+      if (await session.selectHitterTeam(teamCode)) {
+        for (const opt of session.hitterOptions) {
+          hitters.push({ name: opt.name, team: teamName, teamCode, kboPlayerId: opt.id, position: "타자" });
+        }
+        console.log(`  ${teamName}: 타자 ${session.hitterOptions.length}명`);
       }
-      console.log(`  ${teamName}: 타자 ${session.hitterOptions.length}명`);
+      await sleep(2000);
     }
-    await sleep(2000);
   }
 
   console.log(`\n선수 수집 완료: 투수 ${pitchers.length}명, 타자 ${hitters.length}명\n`);
@@ -605,7 +612,7 @@ const SESSION_REFRESH = parseInt(getCliOption("--refresh", "40"));
 
 // ─── 전체/팀 크롤링 ───
 async function runFull() {
-  const { pitchers: allPitchers, hitters } = await loadPlayersFromMatchupPage();
+  const { pitchers: allPitchers, hitters } = await loadPlayersFromMatchupPage(PITCHER_TEAM_FILTER || undefined);
   const cache = loadCache();
   const completedSet = new Set(cache.completed);
 
